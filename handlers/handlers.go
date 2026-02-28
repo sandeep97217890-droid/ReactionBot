@@ -50,8 +50,31 @@ func Register(client *telegram.Client, st *store.Store, ownerID int64, isPremium
 	})
 }
 
+const helpText = `🤖 *ReactionBot Commands*
+
+/start - Show welcome message
+/help - Show this help message
+/react on|off - Enable or disable auto-reactions
+/addchat <chat_id> - Add a chat to the auto-react list
+/removechat <chat_id> - Remove a chat from the auto-react list
+/listchats - List all monitored chats
+/addpremoji <emoji> - Add a premium emoji
+/addnpemoji <emoji> - Add a non-premium emoji
+/listemojis - List all configured emojis
+/status - Show current bot status`
+
 func RegisterBot(client *telegram.Client, st *store.Store, ownerIDs []int64) {
 	f := telegram.FromUser(ownerIDs...)
+
+	client.On("cmd:start", func(m *telegram.NewMessage) error {
+		_, _ = m.Reply("👋 Welcome to *ReactionBot*!\n\nI automatically react to messages in configured chats.\nSend /help to see all available commands.")
+		return nil
+	})
+
+	client.On("cmd:help", func(m *telegram.NewMessage) error {
+		_, _ = m.Reply(helpText)
+		return nil
+	})
 
 	client.On("cmd:react", func(m *telegram.NewMessage) error {
 		arg := strings.ToLower(strings.TrimSpace(m.Args()))
