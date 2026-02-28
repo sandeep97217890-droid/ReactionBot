@@ -7,10 +7,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"syscall"
-	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/joho/godotenv"
@@ -51,29 +48,75 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	var (
-		wg      sync.WaitGroup
-		started int64
-	)
+	var clients []*telegram.Client
+	startedCount := 0
 
 	for _, sess := range premSessions {
-		wg.Add(1)
-		go func(s string) {
-			defer wg.Done()
-			if runClient(ctx, int32(appID), appHash, s, true, st) {
-				atomic.AddInt64(&started, 1)
-			}
-		}(sess)
+		client, err := telegram.NewClient(telegram.ClientConfig{
+			AppID:         int32(appID),
+			AppHash:       appHash,
+			StringSession: sess,
+			MemorySession: true,
+			LogLevel:      telegram.LogInfo,
+		})
+		if err != nil {
+			log.Printf("Failed to create client: %v", err)
+			continue
+		}
+		authorized, err := client.IsAuthorized()
+		if err != nil {
+			log.Printf("Session authorization check failed (%v), skipping", err)
+			_ = client.Disconnect()
+			continue
+		}
+		if !authorized {
+			log.Printf("Session not authorized, skipping")
+			_ = client.Disconnect()
+			continue
+		}
+		me, err := client.GetMe()
+		if err != nil {
+			log.Printf("Failed to get self user: %v", err)
+			continue
+		}
+		log.Printf("Logged in as: %s %s (id=%d, premium=true)", me.FirstName, me.LastName, me.ID)
+		handlers.Register(client, st, me.ID, true)
+		clients = append(clients, client)
+		startedCount++
 	}
 
 	for _, sess := range npremSessions {
-		wg.Add(1)
-		go func(s string) {
-			defer wg.Done()
-			if runClient(ctx, int32(appID), appHash, s, false, st) {
-				atomic.AddInt64(&started, 1)
-			}
-		}(sess)
+		client, err := telegram.NewClient(telegram.ClientConfig{
+			AppID:         int32(appID),
+			AppHash:       appHash,
+			StringSession: sess,
+			MemorySession: true,
+			LogLevel:      telegram.LogInfo,
+		})
+		if err != nil {
+			log.Printf("Failed to create client: %v", err)
+			continue
+		}
+		authorized, err := client.IsAuthorized()
+		if err != nil {
+			log.Printf("Session authorization check failed (%v), skipping", err)
+			_ = client.Disconnect()
+			continue
+		}
+		if !authorized {
+			log.Printf("Session not authorized, skipping")
+			_ = client.Disconnect()
+			continue
+		}
+		me, err := client.GetMe()
+		if err != nil {
+			log.Printf("Failed to get self user: %v", err)
+			continue
+		}
+		log.Printf("Logged in as: %s %s (id=%d, premium=false)", me.FirstName, me.LastName, me.ID)
+		handlers.Register(client, st, me.ID, false)
+		clients = append(clients, client)
+		startedCount++
 	}
 
 	if botToken != "" {
@@ -81,89 +124,37 @@ func main() {
 		if len(ownerIDs) == 0 {
 			log.Fatal("OWNER_IDS must contain at least one valid user ID when BOT_TOKEN is configured.")
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if runBot(ctx, int32(appID), appHash, botToken, ownerIDs, st) {
-				atomic.AddInt64(&started, 1)
+		client, err := telegram.NewClient(telegram.ClientConfig{
+			AppID:    int32(appID),
+			AppHash:  appHash,
+			LogLevel: telegram.LogInfo,
+		})
+		if err != nil {
+			log.Printf("Failed to create bot client: %v", err)
+		} else if err := client.LoginBot(botToken); err != nil {
+			log.Printf("Failed to login bot: %v", err)
+			_ = client.Disconnect()
+		} else {
+			me, err := client.GetMe()
+			if err != nil {
+				log.Printf("Failed to get bot user: %v", err)
+			} else {
+				log.Printf("Bot logged in as: @%s (id=%d)", me.Username, me.ID)
+				handlers.RegisterBot(client, st, ownerIDs)
+				clients = append(clients, client)
+				startedCount++
 			}
-		}()
+		}
 	}
 
-	wg.Wait()
-
-	if started == 0 {
+	if startedCount == 0 {
 		log.Fatal("All clients failed to start.")
 	}
-}
-
-func runClient(ctx context.Context, appID int32, appHash, session string, isPremium bool, st *store.Store) bool {
-	cfg := telegram.ClientConfig{
-		AppID:         appID,
-		AppHash:       appHash,
-		StringSession: session,
-		MemorySession: true,
-		LogLevel:      telegram.LogInfo,
-	}
-
-	client, err := telegram.NewClient(cfg)
-	if err != nil {
-		log.Printf("Failed to create client: %v", err)
-		return false
-	}
-	
-	authorized, err := client.IsAuthorized()
-	if err != nil {
-		log.Printf("Session authorization check failed (%v), skipping", err)
-		_ = client.Disconnect()
-		return false
-	}
-	if !authorized {
-		log.Printf("Session not authorized, skipping")
-		_ = client.Disconnect()
-		return false
-	}
-
-	me, err := client.GetMe()
-	if err != nil {
-		log.Printf("Failed to get self user: %v", err)
-		return false
-	}
-
-	log.Printf("Logged in as: %s %s (id=%d, premium=%v)", me.FirstName, me.LastName, me.ID, isPremium)
-
-	handlers.Register(client, st, me.ID, isPremium)
 
 	<-ctx.Done()
-	_ = client.Stop()
-	return true
-}
-
-func runBot(ctx context.Context, appID int32, appHash, botToken string, ownerIDs []int64, st *store.Store) bool {
-	client, err := telegram.NewClient(telegram.ClientConfig{
-		AppID:         appID,
-		AppHash:       appHash,
-		LogLevel:      telegram.LogInfo,
-	})
-	if err != nil {
-		log.Printf("Failed to create bot client: %v", err)
-		return false
+	for _, c := range clients {
+		_ = c.Stop()
 	}
-	if err := client.LoginBot(botToken);err 
-
-	me, err := client.GetMe()
-	if err != nil {
-		log.Printf("Failed to get bot user: %v", err)
-		return false
-	}
-
-	log.Printf("Bot logged in as: @%s (id=%d)", me.Username, me.ID)
-
-	handlers.RegisterBot(client, st, ownerIDs)
-
-	<-ctx.Done()
-	_ = client.Stop()
-	return true
 }
 
 func parseSessions(raw string) []string {
