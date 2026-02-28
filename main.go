@@ -40,8 +40,7 @@ premSessions := parseSessions(os.Getenv("PREM_SESSIONS"))
 npremSessions := parseSessions(os.Getenv("NPREM_SESSIONS"))
 botToken := os.Getenv("BOT_TOKEN")
 
-total := len(premSessions) + len(npremSessions)
-if total == 0 && botToken == "" {
+if len(premSessions)+len(npremSessions) == 0 && botToken == "" {
 log.Fatal("No sessions or bot token configured. Set PREM_SESSIONS, NPREM_SESSIONS and/or BOT_TOKEN.")
 }
 
@@ -71,18 +70,14 @@ atomic.AddInt64(&started, 1)
 }
 
 if botToken != "" {
-ownerIDStr := os.Getenv("OWNER_ID")
-if ownerIDStr == "" {
-log.Fatal("OWNER_ID must be set when BOT_TOKEN is configured.")
-}
-ownerID, err := strconv.ParseInt(ownerIDStr, 10, 64)
-if err != nil {
-log.Fatalf("OWNER_ID must be a valid integer: %v", err)
+ownerIDs := parseOwnerIDs(mustEnv("OWNER_IDS"))
+if len(ownerIDs) == 0 {
+log.Fatal("OWNER_IDS must contain at least one valid user ID when BOT_TOKEN is configured.")
 }
 wg.Add(1)
 go func() {
 defer wg.Done()
-if runBot(int32(appID), appHash, botToken, ownerID, st) {
+if runBot(int32(appID), appHash, botToken, ownerIDs, st) {
 atomic.AddInt64(&started, 1)
 }
 }()
@@ -129,7 +124,7 @@ client.Idle()
 return true
 }
 
-func runBot(appID int32, appHash, botToken string, ownerID int64, st *store.Store) bool {
+func runBot(appID int32, appHash, botToken string, ownerIDs []int64, st *store.Store) bool {
 client, err := telegram.NewClient(telegram.ClientConfig{
 AppID:         appID,
 AppHash:       appHash,
@@ -159,7 +154,7 @@ return false
 
 log.Printf("Bot logged in as: @%s (id=%d)", me.Username, me.ID)
 
-handlers.RegisterBot(client, st, ownerID)
+handlers.RegisterBot(client, st, ownerIDs)
 
 client.Idle()
 return true
@@ -179,6 +174,23 @@ out = append(out, p)
 }
 }
 return out
+}
+
+func parseOwnerIDs(raw string) []int64 {
+var ids []int64
+for _, p := range strings.Split(raw, ",") {
+p = strings.TrimSpace(p)
+if p == "" {
+continue
+}
+id, err := strconv.ParseInt(p, 10, 64)
+if err != nil {
+log.Printf("Skipping invalid owner ID %q: %v", p, err)
+continue
+}
+ids = append(ids, id)
+}
+return ids
 }
 
 func mustEnv(key string) string {
