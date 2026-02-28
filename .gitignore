@@ -1,0 +1,12 @@
+# Compiled binary
+reactionbot
+reactionbot.exe
+
+# Telegram session files
+*.session
+
+# SQLite database
+*.db
+
+# Environment file with real credentials
+.env
