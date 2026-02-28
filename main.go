@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/joho/godotenv"
@@ -111,8 +112,29 @@ func runClient(ctx context.Context, appID int32, appHash, session string, isPrem
 		return false
 	}
 
-	if err := client.Start(); err != nil {
-		log.Printf("Failed to start client: %v", err)
+	connErr := make(chan error, 1)
+	go func() { connErr <- client.Connect() }()
+	select {
+	case err := <-connErr:
+		if err != nil {
+			log.Printf("Failed to connect client: %v", err)
+			return false
+		}
+	case <-time.After(30 * time.Second):
+		log.Printf("Client connect timed out, skipping session")
+		_ = client.Disconnect()
+		return false
+	}
+
+	authorized, err := client.IsAuthorized()
+	if err != nil {
+		log.Printf("Session authorization check failed (%v), skipping", err)
+		_ = client.Disconnect()
+		return false
+	}
+	if !authorized {
+		log.Printf("Session not authorized, skipping")
+		_ = client.Disconnect()
 		return false
 	}
 
@@ -143,13 +165,23 @@ func runBot(ctx context.Context, appID int32, appHash, botToken string, ownerIDs
 		return false
 	}
 
-	if err := client.Connect(); err != nil {
-		log.Printf("Failed to connect bot: %v", err)
-		return false
-	}
-
-	if err := client.LoginBot(botToken); err != nil {
-		log.Printf("Failed to login bot: %v", err)
+	botErr := make(chan error, 1)
+	go func() {
+		if err := client.Connect(); err != nil {
+			botErr <- err
+			return
+		}
+		botErr <- client.LoginBot(botToken)
+	}()
+	select {
+	case err := <-botErr:
+		if err != nil {
+			log.Printf("Failed to start bot: %v", err)
+			return false
+		}
+	case <-time.After(30 * time.Second):
+		log.Printf("Bot start timed out")
+		_ = client.Stop()
 		return false
 	}
 
