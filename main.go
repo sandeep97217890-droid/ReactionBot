@@ -38,10 +38,11 @@ defer st.Close()
 
 premSessions := parseSessions(os.Getenv("PREM_SESSIONS"))
 npremSessions := parseSessions(os.Getenv("NPREM_SESSIONS"))
+botToken := os.Getenv("BOT_TOKEN")
 
 total := len(premSessions) + len(npremSessions)
-if total == 0 {
-log.Fatal("No sessions configured. Set PREM_SESSIONS and/or NPREM_SESSIONS.")
+if total == 0 && botToken == "" {
+log.Fatal("No sessions or bot token configured. Set PREM_SESSIONS, NPREM_SESSIONS and/or BOT_TOKEN.")
 }
 
 var (
@@ -67,6 +68,24 @@ if runClient(int32(appID), appHash, s, false, st) {
 atomic.AddInt64(&started, 1)
 }
 }(sess)
+}
+
+if botToken != "" {
+ownerIDStr := os.Getenv("OWNER_ID")
+if ownerIDStr == "" {
+log.Fatal("OWNER_ID must be set when BOT_TOKEN is configured.")
+}
+ownerID, err := strconv.ParseInt(ownerIDStr, 10, 64)
+if err != nil {
+log.Fatalf("OWNER_ID must be a valid integer: %v", err)
+}
+wg.Add(1)
+go func() {
+defer wg.Done()
+if runBot(int32(appID), appHash, botToken, ownerID, st) {
+atomic.AddInt64(&started, 1)
+}
+}()
 }
 
 wg.Wait()
@@ -105,6 +124,42 @@ return false
 log.Printf("Logged in as: %s %s (id=%d, premium=%v)", me.FirstName, me.LastName, me.ID, isPremium)
 
 handlers.Register(client, st, me.ID, isPremium)
+
+client.Idle()
+return true
+}
+
+func runBot(appID int32, appHash, botToken string, ownerID int64, st *store.Store) bool {
+client, err := telegram.NewClient(telegram.ClientConfig{
+AppID:         appID,
+AppHash:       appHash,
+MemorySession: true,
+LogLevel:      telegram.LogInfo,
+})
+if err != nil {
+log.Printf("Failed to create bot client: %v", err)
+return false
+}
+
+if err := client.Connect(); err != nil {
+log.Printf("Failed to connect bot: %v", err)
+return false
+}
+
+if err := client.LoginBot(botToken); err != nil {
+log.Printf("Failed to login bot: %v", err)
+return false
+}
+
+me, err := client.GetMe()
+if err != nil {
+log.Printf("Failed to get bot user: %v", err)
+return false
+}
+
+log.Printf("Bot logged in as: @%s (id=%d)", me.Username, me.ID)
+
+handlers.RegisterBot(client, st, ownerID)
 
 client.Idle()
 return true
