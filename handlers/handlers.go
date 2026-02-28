@@ -67,7 +67,7 @@ func sendReaction(sess Session, st *store.Store, chatID int64, msgID int32) {
 		reaction = []string{emojis[rand.IntN(len(emojis))]}
 	}
 	if err := sess.Client.SendReaction(chatID, msgID, reaction, true); err != nil {
-		log.Printf("SendReaction failed (isPremium=%v): %v", sess.IsPremium, err)
+		log.Printf("SendReaction failed (isPremium=%v, chatID=%d, msgID=%d, reaction=%v): %v", sess.IsPremium, chatID, msgID, reaction, err)
 	}
 }
 
@@ -103,12 +103,20 @@ func RegisterBot(client *telegram.Client, st *store.Store, ownerIDs []int64, use
 		arg := strings.ToLower(strings.TrimSpace(m.Args()))
 		switch arg {
 		case "on":
+			if st.IsEnabled() {
+				_, _ = m.Reply("ℹ️ Auto-reactions are already enabled.")
+				return nil
+			}
 			if err := st.SetEnabled(true); err != nil {
 				_, _ = m.Reply("❌ Failed to enable: " + err.Error())
 				return err
 			}
 			_, _ = m.Reply("✅ Auto-reactions enabled.")
 		case "off":
+			if !st.IsEnabled() {
+				_, _ = m.Reply("ℹ️ Auto-reactions are already disabled.")
+				return nil
+			}
 			if err := st.SetEnabled(false); err != nil {
 				_, _ = m.Reply("❌ Failed to disable: " + err.Error())
 				return err
