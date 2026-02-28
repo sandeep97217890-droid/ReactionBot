@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"html"
 	"math/rand/v2"
 	"strconv"
 	"strings"
@@ -50,24 +51,28 @@ func Register(client *telegram.Client, st *store.Store, ownerID int64, isPremium
 	})
 }
 
-const helpText = `🤖 *ReactionBot Commands*
+const helpText = `🤖 <b>ReactionBot Commands</b>
 
 /start - Show welcome message
 /help - Show this help message
 /react on|off - Enable or disable auto-reactions
-/addchat <chat_id> - Add a chat to the auto-react list
-/removechat <chat_id> - Remove a chat from the auto-react list
+/joinchat &lt;link&gt; - Join a chat via private (<code>+Hash</code>) or public (<code>@username</code>) invite link
+/addchat &lt;chat_id&gt; - Add a chat to the auto-react list
+/removechat &lt;chat_id&gt; - Remove a chat from the auto-react list
 /listchats - List all monitored chats
-/addpremoji <emoji> - Add a premium emoji
-/addnpemoji <emoji> - Add a non-premium emoji
+/addpremoji &lt;emoji&gt; - Add a premium emoji
+/addnpemoji &lt;emoji&gt; - Add a non-premium emoji
 /listemojis - List all configured emojis
 /status - Show current bot status`
 
-func RegisterBot(client *telegram.Client, st *store.Store, ownerIDs []int64) {
+// RegisterBot registers bot command handlers.
+// userClients is the list of userbot (non-bot) clients that will be instructed
+// to join chats via /joinchat.
+func RegisterBot(client *telegram.Client, st *store.Store, ownerIDs []int64, userClients []*telegram.Client) {
 	f := telegram.FromUser(ownerIDs...)
 
 	client.On("cmd:start", func(m *telegram.NewMessage) error {
-		_, _ = m.Reply("👋 Welcome to *ReactionBot*!\n\nI automatically react to messages in configured chats.\nSend /help to see all available commands.")
+		_, _ = m.Reply("👋 Welcome to <b>ReactionBot</b>!\n\nI automatically react to messages in configured chats.\nSend /help to see all available commands.")
 		return nil
 	})
 
@@ -94,6 +99,49 @@ func RegisterBot(client *telegram.Client, st *store.Store, ownerIDs []int64) {
 		default:
 			_, _ = m.Reply("Usage: /react on|off")
 		}
+		return nil
+	}, f)
+
+	client.On("cmd:joinchat", func(m *telegram.NewMessage) error {
+		arg := strings.TrimSpace(m.Args())
+		if arg == "" {
+			_, _ = m.Reply("Usage: /joinchat &lt;invite_link&gt;\n\nSupports:\n• Private: <code>+AbCdEfGh</code> or <code>https://t.me/+AbCdEfGh</code>\n• Public: <code>@username</code> or <code>https://t.me/username</code>")
+			return nil
+		}
+		if len(userClients) == 0 {
+			_, _ = m.Reply("❌ No userbot sessions configured. Add <code>PREM_SESSIONS</code> or <code>NPREM_SESSIONS</code>.")
+			return nil
+		}
+
+		// Normalize bare private invite links (+HASH → full URL so JoinChannel can parse them).
+		link := arg
+		if strings.HasPrefix(link, "+") {
+			link = "https://t.me/" + link
+		}
+
+		var lastErr error
+		joined := 0
+		for _, uc := range userClients {
+			if _, err := uc.JoinChannel(link); err != nil {
+				lastErr = err
+			} else {
+				joined++
+			}
+		}
+
+		if joined == 0 {
+			errMsg := "unknown error"
+			if lastErr != nil {
+				errMsg = lastErr.Error()
+			}
+			_, _ = m.Reply("❌ Failed to join chat: " + html.EscapeString(errMsg))
+			return nil
+		}
+
+		_, _ = m.Reply(fmt.Sprintf(
+			"✅ Joined chat via invite link (%d/%d sessions succeeded).\nUse /addchat &lt;chat_id&gt; to start monitoring.",
+			joined, len(userClients),
+		))
 		return nil
 	}, f)
 

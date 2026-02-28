@@ -49,17 +49,20 @@ func main() {
 	defer stop()
 
 	var clients []*telegram.Client
+	var userClients []*telegram.Client
 	startedCount := 0
 
 	for _, sess := range premSessions {
 		if client := startSession(int32(appID), appHash, sess, true, st); client != nil {
 			clients = append(clients, client)
+			userClients = append(userClients, client)
 			startedCount++
 		}
 	}
 	for _, sess := range npremSessions {
 		if client := startSession(int32(appID), appHash, sess, false, st); client != nil {
 			clients = append(clients, client)
+			userClients = append(userClients, client)
 			startedCount++
 		}
 	}
@@ -86,7 +89,7 @@ func main() {
 				_ = client.Disconnect()
 			} else {
 				log.Printf("Bot logged in as: @%s (id=%d)", me.Username, me.ID)
-				handlers.RegisterBot(client, st, ownerIDs)
+				handlers.RegisterBot(client, st, ownerIDs, userClients)
 				clients = append(clients, client)
 				startedCount++
 			}
