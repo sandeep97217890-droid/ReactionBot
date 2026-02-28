@@ -50,21 +50,28 @@ func main() {
 
 	var clients []*telegram.Client
 	var userClients []*telegram.Client
+	var sessions []handlers.Session
 	startedCount := 0
 
 	for _, sess := range premSessions {
-		if client := startSession(int32(appID), appHash, sess, true, st); client != nil {
+		if client := startSession(int32(appID), appHash, sess, true); client != nil {
+			sessions = append(sessions, handlers.Session{Client: client, IsPremium: true})
 			clients = append(clients, client)
 			userClients = append(userClients, client)
 			startedCount++
 		}
 	}
 	for _, sess := range npremSessions {
-		if client := startSession(int32(appID), appHash, sess, false, st); client != nil {
+		if client := startSession(int32(appID), appHash, sess, false); client != nil {
+			sessions = append(sessions, handlers.Session{Client: client, IsPremium: false})
 			clients = append(clients, client)
 			userClients = append(userClients, client)
 			startedCount++
 		}
+	}
+
+	if len(sessions) > 0 {
+		handlers.Register(sessions, st)
 	}
 
 	if botToken != "" {
@@ -106,7 +113,7 @@ func main() {
 	}
 }
 
-func startSession(appID int32, appHash, sess string, isPremium bool, st *store.Store) *telegram.Client {
+func startSession(appID int32, appHash, sess string, isPremium bool) *telegram.Client {
 	client, err := telegram.NewClient(telegram.ClientConfig{
 		AppID:         appID,
 		AppHash:       appHash,
@@ -136,7 +143,6 @@ func startSession(appID int32, appHash, sess string, isPremium bool, st *store.S
 		return nil
 	}
 	log.Printf("Logged in as: %s %s (id=%d, premium=%v)", me.FirstName, me.LastName, me.ID, isPremium)
-	handlers.Register(client, st, me.ID, isPremium)
 	return client
 }
 

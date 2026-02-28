@@ -3,9 +3,11 @@ package handlers
 import (
 	"fmt"
 	"html"
+	"log"
 	"math/rand/v2"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/sandeep97217890-droid/ReactionBot/store"
@@ -13,41 +15,60 @@ import (
 
 const maxPremiumReactions = 3
 
-func Register(client *telegram.Client, st *store.Store, ownerID int64, isPremium bool) {
-	client.On(telegram.OnNewMessage, func(m *telegram.NewMessage) error {
-		
-		if !st.IsEnabled() {
-			return nil
-		}
-		if !st.HasChat(m.ChatID()) {
-			return nil
-		}
-		fmt.Println("Received message in chat", m.ChatID(), "from", m.SenderID(), "isPremium:", isPremium)
-		var reaction []string
-		if isPremium {
-			emojis, err := st.GetPremEmojis()
-			if err != nil || len(emojis) == 0 {
+type Session struct {
+	Client    *telegram.Client
+	IsPremium bool
+}
+
+func Register(sessions []Session, st *store.Store) {
+	if len(sessions) == 0 {
+		return
+	}
+	var seen sync.Map
+	for _, sess := range sessions {
+		sess := sess
+		sess.Client.On(telegram.OnNewMessage, func(m *telegram.NewMessage) error {
+			if !st.IsEnabled() || !st.HasChat(m.ChatID()) {
 				return nil
 			}
-			rand.Shuffle(len(emojis), func(i, j int) { emojis[i], emojis[j] = emojis[j], emojis[i] })
-			count := maxPremiumReactions
-			if len(emojis) < count {
-				count = len(emojis)
-			}
-			reaction = emojis[:count]
-		} else {
-			emojis, err := st.GetNpremEmojis()
-			if err != nil || len(emojis) == 0 {
+			chatID := m.ChannelID()
+			msgID := m.ID
+			key := [2]int64{chatID, int64(msgID)}
+			if _, loaded := seen.LoadOrStore(key, struct{}{}); loaded {
 				return nil
 			}
-			reaction = []string{emojis[rand.IntN(len(emojis))]}
+			fmt.Println("Received message in chat", m.ChatID(), "– reacting with all sessions")
+			for _, s := range sessions {
+				sendReaction(s, st, chatID, msgID)
+			}
+			return nil
+		})
+	}
+}
+
+func sendReaction(sess Session, st *store.Store, chatID int64, msgID int32) {
+	var reaction []string
+	if sess.IsPremium {
+		emojis, err := st.GetPremEmojis()
+		if err != nil || len(emojis) == 0 {
+			return
 		}
-		reactions := make([]any, len(reaction))
-		for i, r := range reaction {
-			reactions[i] = r
+		rand.Shuffle(len(emojis), func(i, j int) { emojis[i], emojis[j] = emojis[j], emojis[i] })
+		count := maxPremiumReactions
+		if len(emojis) < count {
+			count = len(emojis)
 		}
-		return m.React(reactions...)
-	})
+		reaction = emojis[:count]
+	} else {
+		emojis, err := st.GetNpremEmojis()
+		if err != nil || len(emojis) == 0 {
+			return
+		}
+		reaction = []string{emojis[rand.IntN(len(emojis))]}
+	}
+	if err := sess.Client.SendReaction(chatID, msgID, reaction, true); err != nil {
+		log.Printf("SendReaction failed (isPremium=%v): %v", sess.IsPremium, err)
+	}
 }
 
 const helpText = `🤖 <b>ReactionBot Commands</b>
@@ -65,9 +86,6 @@ const helpText = `🤖 <b>ReactionBot Commands</b>
 /validreactions - Show all valid Telegram reaction emojis
 /status - Show current bot status`
 
-// RegisterBot registers bot command handlers.
-// userClients is the list of userbot (non-bot) clients that will be instructed
-// to join chats via /joinchat.
 func RegisterBot(client *telegram.Client, st *store.Store, ownerIDs []int64, userClients []*telegram.Client) {
 	f := telegram.FromUser(ownerIDs...)
 
@@ -113,7 +131,6 @@ func RegisterBot(client *telegram.Client, st *store.Store, ownerIDs []int64, use
 			return nil
 		}
 
-		// Normalize bare private invite links (+HASH → full URL so JoinChannel can parse them).
 		link := arg
 		if strings.HasPrefix(link, "+") {
 			link = "https://t.me/" + link
