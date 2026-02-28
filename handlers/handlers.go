@@ -15,15 +15,14 @@ const maxPremiumReactions = 3
 
 func Register(client *telegram.Client, st *store.Store, ownerID int64, isPremium bool) {
 	client.On(telegram.OnNewMessage, func(m *telegram.NewMessage) error {
-		if m.SenderID() == ownerID {
-			return nil
-		}
+		
 		if !st.IsEnabled() {
 			return nil
 		}
 		if !st.HasChat(m.ChatID()) {
 			return nil
 		}
+		fmt.Println("Received message in chat", m.ChatID(), "from", m.SenderID(), "isPremium:", isPremium)
 		var reaction []string
 		if isPremium {
 			emojis, err := st.GetPremEmojis()
