@@ -111,21 +111,7 @@ func runClient(ctx context.Context, appID int32, appHash, session string, isPrem
 		log.Printf("Failed to create client: %v", err)
 		return false
 	}
-
-	connErr := make(chan error, 1)
-	go func() { connErr <- client.Connect() }()
-	select {
-	case err := <-connErr:
-		if err != nil {
-			log.Printf("Failed to connect client: %v", err)
-			return false
-		}
-	case <-time.After(30 * time.Second):
-		log.Printf("Client connect timed out, skipping session")
-		_ = client.Disconnect()
-		return false
-	}
-
+	
 	authorized, err := client.IsAuthorized()
 	if err != nil {
 		log.Printf("Session authorization check failed (%v), skipping", err)
@@ -157,33 +143,13 @@ func runBot(ctx context.Context, appID int32, appHash, botToken string, ownerIDs
 	client, err := telegram.NewClient(telegram.ClientConfig{
 		AppID:         appID,
 		AppHash:       appHash,
-		MemorySession: true,
 		LogLevel:      telegram.LogInfo,
 	})
 	if err != nil {
 		log.Printf("Failed to create bot client: %v", err)
 		return false
 	}
-
-	botErr := make(chan error, 1)
-	go func() {
-		if err := client.Connect(); err != nil {
-			botErr <- err
-			return
-		}
-		botErr <- client.LoginBot(botToken)
-	}()
-	select {
-	case err := <-botErr:
-		if err != nil {
-			log.Printf("Failed to start bot: %v", err)
-			return false
-		}
-	case <-time.After(30 * time.Second):
-		log.Printf("Bot start timed out")
-		_ = client.Stop()
-		return false
-	}
+	if err := client.LoginBot(botToken);err 
 
 	me, err := client.GetMe()
 	if err != nil {
