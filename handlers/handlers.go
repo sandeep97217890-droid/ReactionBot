@@ -60,9 +60,10 @@ const helpText = `🤖 <b>ReactionBot Commands</b>
 /addchat &lt;chat_id&gt; - Add a chat to the auto-react list
 /removechat &lt;chat_id&gt; - Remove a chat from the auto-react list
 /listchats - List all monitored chats
-/addpremoji &lt;emoji&gt; - Add a premium emoji
-/addnpemoji &lt;emoji&gt; - Add a non-premium emoji
+/addpremoji &lt;emoji…&gt; - Add one or more premium reaction emojis (space-separated)
+/addnpemoji &lt;emoji…&gt; - Add one or more non-premium reaction emojis (space-separated)
 /listemojis - List all configured emojis
+/validreactions - Show all valid Telegram reaction emojis
 /status - Show current bot status`
 
 // RegisterBot registers bot command handlers.
@@ -184,30 +185,60 @@ func RegisterBot(client *telegram.Client, st *store.Store, ownerIDs []int64, use
 	}, f)
 
 	client.On("cmd:addpremoji", func(m *telegram.NewMessage) error {
-		emoji := strings.TrimSpace(m.Args())
-		if emoji == "" {
-			_, _ = m.Reply("Usage: /addpremoji <emoji>")
+		args := strings.Fields(m.Args())
+		if len(args) == 0 {
+			_, _ = m.Reply("Usage: /addpremoji <emoji…>\nEmojis must be space-separated valid Telegram reactions.\nSee /validreactions for the full list.")
 			return nil
 		}
-		if err := st.AddPremEmoji(emoji); err != nil {
-			_, _ = m.Reply("❌ Failed to add premium emoji: " + err.Error())
-			return err
+		var added, invalid []string
+		for _, emoji := range args {
+			if !IsValidReaction(emoji) {
+				invalid = append(invalid, emoji)
+				continue
+			}
+			if err := st.AddPremEmoji(emoji); err != nil {
+				_, _ = m.Reply("❌ Failed to add premium emoji: " + err.Error())
+				return err
+			}
+			added = append(added, emoji)
 		}
-		_, _ = m.Reply("✅ Premium emoji added: " + emoji)
+		var parts []string
+		if len(added) > 0 {
+			parts = append(parts, "✅ Premium emoji(s) added: "+strings.Join(added, " "))
+		}
+		if len(invalid) > 0 {
+			parts = append(parts, "❌ Invalid reaction emoji(s): "+strings.Join(invalid, " ")+"\nUse /validreactions to see valid options.")
+		}
+		_, _ = m.Reply(strings.Join(parts, "\n"))
 		return nil
 	}, f)
 
 	client.On("cmd:addnpemoji", func(m *telegram.NewMessage) error {
-		emoji := strings.TrimSpace(m.Args())
-		if emoji == "" {
-			_, _ = m.Reply("Usage: /addnpemoji <emoji>")
+		args := strings.Fields(m.Args())
+		if len(args) == 0 {
+			_, _ = m.Reply("Usage: /addnpemoji <emoji…>\nEmojis must be space-separated valid Telegram reactions.\nSee /validreactions for the full list.")
 			return nil
 		}
-		if err := st.AddNpremEmoji(emoji); err != nil {
-			_, _ = m.Reply("❌ Failed to add non-premium emoji: " + err.Error())
-			return err
+		var added, invalid []string
+		for _, emoji := range args {
+			if !IsValidReaction(emoji) {
+				invalid = append(invalid, emoji)
+				continue
+			}
+			if err := st.AddNpremEmoji(emoji); err != nil {
+				_, _ = m.Reply("❌ Failed to add non-premium emoji: " + err.Error())
+				return err
+			}
+			added = append(added, emoji)
 		}
-		_, _ = m.Reply("✅ Non-premium emoji added: " + emoji)
+		var parts []string
+		if len(added) > 0 {
+			parts = append(parts, "✅ Non-premium emoji(s) added: "+strings.Join(added, " "))
+		}
+		if len(invalid) > 0 {
+			parts = append(parts, "❌ Invalid reaction emoji(s): "+strings.Join(invalid, " ")+"\nUse /validreactions to see valid options.")
+		}
+		_, _ = m.Reply(strings.Join(parts, "\n"))
 		return nil
 	}, f)
 
@@ -244,6 +275,15 @@ func RegisterBot(client *telegram.Client, st *store.Store, ownerIDs []int64, use
 			"⭐ Premium emojis (%d):\n%s\n\n👤 Non-premium emojis (%d):\n%s",
 			len(prem), strings.Join(prem, " "),
 			len(nprem), strings.Join(nprem, " "),
+		))
+		return nil
+	}, f)
+
+	client.On("cmd:validreactions", func(m *telegram.NewMessage) error {
+		list := ValidReactionList()
+		_, _ = m.Reply(fmt.Sprintf(
+			"✅ <b>Valid Telegram reaction emojis (%d):</b>\n%s\n\nUse these with /addnpemoji or /addpremoji (space-separated).",
+			len(list), strings.Join(list, " "),
 		))
 		return nil
 	}, f)
