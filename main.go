@@ -52,71 +52,16 @@ func main() {
 	startedCount := 0
 
 	for _, sess := range premSessions {
-		client, err := telegram.NewClient(telegram.ClientConfig{
-			AppID:         int32(appID),
-			AppHash:       appHash,
-			StringSession: sess,
-			MemorySession: true,
-			LogLevel:      telegram.LogInfo,
-		})
-		if err != nil {
-			log.Printf("Failed to create client: %v", err)
-			continue
+		if client := startSession(int32(appID), appHash, sess, true, st); client != nil {
+			clients = append(clients, client)
+			startedCount++
 		}
-		authorized, err := client.IsAuthorized()
-		if err != nil {
-			log.Printf("Session authorization check failed (%v), skipping", err)
-			_ = client.Disconnect()
-			continue
-		}
-		if !authorized {
-			log.Printf("Session not authorized, skipping")
-			_ = client.Disconnect()
-			continue
-		}
-		me, err := client.GetMe()
-		if err != nil {
-			log.Printf("Failed to get self user: %v", err)
-			continue
-		}
-		log.Printf("Logged in as: %s %s (id=%d, premium=true)", me.FirstName, me.LastName, me.ID)
-		handlers.Register(client, st, me.ID, true)
-		clients = append(clients, client)
-		startedCount++
 	}
-
 	for _, sess := range npremSessions {
-		client, err := telegram.NewClient(telegram.ClientConfig{
-			AppID:         int32(appID),
-			AppHash:       appHash,
-			StringSession: sess,
-			MemorySession: true,
-			LogLevel:      telegram.LogInfo,
-		})
-		if err != nil {
-			log.Printf("Failed to create client: %v", err)
-			continue
+		if client := startSession(int32(appID), appHash, sess, false, st); client != nil {
+			clients = append(clients, client)
+			startedCount++
 		}
-		authorized, err := client.IsAuthorized()
-		if err != nil {
-			log.Printf("Session authorization check failed (%v), skipping", err)
-			_ = client.Disconnect()
-			continue
-		}
-		if !authorized {
-			log.Printf("Session not authorized, skipping")
-			_ = client.Disconnect()
-			continue
-		}
-		me, err := client.GetMe()
-		if err != nil {
-			log.Printf("Failed to get self user: %v", err)
-			continue
-		}
-		log.Printf("Logged in as: %s %s (id=%d, premium=false)", me.FirstName, me.LastName, me.ID)
-		handlers.Register(client, st, me.ID, false)
-		clients = append(clients, client)
-		startedCount++
 	}
 
 	if botToken != "" {
@@ -156,6 +101,40 @@ func main() {
 	for _, c := range clients {
 		_ = c.Stop()
 	}
+}
+
+func startSession(appID int32, appHash, sess string, isPremium bool, st *store.Store) *telegram.Client {
+	client, err := telegram.NewClient(telegram.ClientConfig{
+		AppID:         appID,
+		AppHash:       appHash,
+		StringSession: sess,
+		MemorySession: true,
+		LogLevel:      telegram.LogInfo,
+	})
+	if err != nil {
+		log.Printf("Failed to create client: %v", err)
+		return nil
+	}
+	authorized, err := client.IsAuthorized()
+	if err != nil {
+		log.Printf("Session authorization check failed (%v), skipping", err)
+		_ = client.Disconnect()
+		return nil
+	}
+	if !authorized {
+		log.Printf("Session not authorized, skipping")
+		_ = client.Disconnect()
+		return nil
+	}
+	me, err := client.GetMe()
+	if err != nil {
+		log.Printf("Failed to get self user: %v", err)
+		_ = client.Disconnect()
+		return nil
+	}
+	log.Printf("Logged in as: %s %s (id=%d, premium=%v)", me.FirstName, me.LastName, me.ID, isPremium)
+	handlers.Register(client, st, me.ID, isPremium)
+	return client
 }
 
 func parseSessions(raw string) []string {
