@@ -138,6 +138,7 @@ func main() {
 			me, err := client.GetMe()
 			if err != nil {
 				log.Printf("Failed to get bot user: %v", err)
+				_ = client.Disconnect()
 			} else {
 				log.Printf("Bot logged in as: @%s (id=%d)", me.Username, me.ID)
 				handlers.RegisterBot(client, st, ownerIDs)
