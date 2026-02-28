@@ -112,17 +112,29 @@ func runClient(ctx context.Context, appID int32, appHash, session string, isPrem
 		return false
 	}
 
-	startErr := make(chan error, 1)
-	go func() { startErr <- client.Start() }()
+	connErr := make(chan error, 1)
+	go func() { connErr <- client.Connect() }()
 	select {
-	case err := <-startErr:
+	case err := <-connErr:
 		if err != nil {
-			log.Printf("Failed to start client: %v", err)
+			log.Printf("Failed to connect client: %v", err)
 			return false
 		}
 	case <-time.After(30 * time.Second):
-		log.Printf("Client start timed out, skipping session")
-		_ = client.Stop()
+		log.Printf("Client connect timed out, skipping session")
+		_ = client.Disconnect()
+		return false
+	}
+
+	authorized, err := client.IsAuthorized()
+	if err != nil {
+		log.Printf("Session authorization check failed (%v), skipping", err)
+		_ = client.Disconnect()
+		return false
+	}
+	if !authorized {
+		log.Printf("Session not authorized, skipping")
+		_ = client.Disconnect()
 		return false
 	}
 
