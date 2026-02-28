@@ -146,10 +146,17 @@ func RegisterBot(client *telegram.Client, st *store.Store, ownerIDs []int64, use
 
 		var lastErr error
 		joined := 0
-		for _, uc := range userClients {
-			if _, err := uc.JoinChannel(link); err != nil {
+		var joinedChatID int64
+		chatIDResolved := false
+		for i, uc := range userClients {
+			if ch, err := uc.JoinChannel(link); err != nil {
+				log.Printf("JoinChannel failed for session %d/%d (link=%s): %v", i+1, len(userClients), link, err)
 				lastErr = err
 			} else {
+				if !chatIDResolved && ch != nil {
+					joinedChatID = ch.ID
+					chatIDResolved = true
+				}
 				joined++
 			}
 		}
@@ -163,10 +170,17 @@ func RegisterBot(client *telegram.Client, st *store.Store, ownerIDs []int64, use
 			return nil
 		}
 
-		_, _ = m.Reply(fmt.Sprintf(
-			"✅ Joined chat via invite link (%d/%d sessions succeeded).\nUse /addchat &lt;chat_id&gt; to start monitoring.",
-			joined, len(userClients),
-		))
+		if chatIDResolved {
+			_, _ = m.Reply(fmt.Sprintf(
+				"✅ Joined chat via invite link (%d/%d sessions succeeded).\nUse /addchat <code>%d</code> to start monitoring.",
+				joined, len(userClients), joinedChatID,
+			))
+		} else {
+			_, _ = m.Reply(fmt.Sprintf(
+				"✅ Joined chat via invite link (%d/%d sessions succeeded).\nUse /addchat &lt;chat_id&gt; to start monitoring.",
+				joined, len(userClients),
+			))
+		}
 		return nil
 	}, f)
 
