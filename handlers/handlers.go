@@ -66,8 +66,10 @@ func sendReaction(sess Session, st *store.Store, chatID int64, msgID int32) {
 		}
 		reaction = []string{emojis[rand.IntN(len(emojis))]}
 	}
-	if err := sess.Client.SendReaction(chatID, msgID, reaction, true); err != nil {
-		log.Printf("SendReaction failed (isPremium=%v, chatID=%d, msgID=%d, reaction=%v): %v", sess.IsPremium, chatID, msgID, reaction, err)
+	for _, emoji := range reaction {
+		if err := sess.Client.SendReaction(chatID, msgID, []string{emoji}, true); err != nil {
+			log.Printf("SendReaction failed (isPremium=%v, chatID=%d, msgID=%d, emoji=%v): %v", sess.IsPremium, chatID, msgID, emoji, err)
+		}
 	}
 }
 
